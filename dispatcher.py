@@ -230,10 +230,12 @@ def main():
         ], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
 
     # 4. Wait for decision from either Menu Bar or Notch HUD
-    decision = "allow"
+    decision = None
     start_time = time.time()
+    # Global hook wait timeout (e.g. 10 minutes)
+    max_wait_seconds = 600.0
 
-    while time.time() - start_time < timeout_sec:
+    while time.time() - start_time < max_wait_seconds:
         # Check if decision was written via Menu Bar app
         if os.path.exists(decision_file):
             try:
@@ -245,21 +247,32 @@ def main():
             except Exception:
                 pass
 
-        # Check if Notch HUD process exited
+        # Check if Notch HUD process responded
         if proc and proc.poll() is not None:
             stdout, _ = proc.communicate()
             match = re.search(r'\{.*\}', stdout)
+            notch_decision = None
             if match:
                 try:
                     res_json = json.loads(match.group(0))
-                    decision = res_json.get("decision", "allow")
+                    notch_decision = res_json.get("decision")
                 except Exception:
-                    decision = "allow" if proc.returncode == 0 else "deny"
-            else:
-                decision = "allow" if proc.returncode == 0 else "deny"
-            break
+                    pass
 
-        time.sleep(0.1)
+            if notch_decision == "allow" or proc.returncode == 0:
+                decision = "allow"
+                break
+            elif notch_decision == "deny" or (proc.returncode == 1 and notch_decision != "dismiss"):
+                decision = "deny"
+                break
+            elif notch_decision == "dismiss" or proc.returncode == 2:
+                # Notch HUD dismissed after timeout -> Keep waiting in Menu Bar!
+                proc = None
+
+        time.sleep(0.15)
+
+    if decision is None:
+        decision = "deny"
 
     # Clean up
     if proc and proc.poll() is None:

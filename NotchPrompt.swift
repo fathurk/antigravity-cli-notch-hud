@@ -137,16 +137,18 @@ struct NotchPromptView: View {
     let config: Config
     let onApprove: () -> Void
     let onDeny: () -> Void
+    let onDismiss: () -> Void
 
     @State private var timeRemaining: Int
     @State private var timer: Timer? = nil
     @State private var isHoveringApprove = false
     @State private var isHoveringDeny = false
 
-    init(config: Config, onApprove: @escaping () -> Void, onDeny: @escaping () -> Void) {
+    init(config: Config, onApprove: @escaping () -> Void, onDeny: @escaping () -> Void, onDismiss: @escaping () -> Void) {
         self.config = config
         self.onApprove = onApprove
         self.onDeny = onDeny
+        self.onDismiss = onDismiss
         _timeRemaining = State(initialValue: Int(config.timeout))
     }
 
@@ -306,7 +308,7 @@ struct NotchPromptView: View {
                     timeRemaining -= 1
                 } else {
                     timer?.invalidate()
-                    onDeny()
+                    onDismiss()
                 }
             }
         }
@@ -431,6 +433,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 },
                 onDeny: { [weak self] in
                     self?.finish(exitCode: 1, decision: "deny")
+                },
+                onDismiss: { [weak self] in
+                    self?.finish(exitCode: 2, decision: "dismiss")
                 }
             )
             window.contentView = NSHostingView(rootView: promptView)
@@ -466,6 +471,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if decision == "allow" {
             print("{\"decision\":\"allow\"}")
             exit(0)
+        } else if decision == "dismiss" {
+            print("{\"decision\":\"dismiss\"}")
+            exit(2)
         } else {
             print("{\"decision\":\"deny\",\"reason\":\"Action denied by user on Mac Notch HUD\"}")
             exit(1)
