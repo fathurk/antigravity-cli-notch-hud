@@ -445,8 +445,10 @@ struct MenuBarView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(14)
-        .frame(width: 340)
+        .padding(.horizontal, 16)
+        .padding(.top, 14)
+        .padding(.bottom, 14)
+        .frame(width: 350)
         .background(Color(red: 0.06, green: 0.07, blue: 0.09).opacity(0.98))
     }
 }
@@ -469,9 +471,9 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
-        // Create Popover
+        // Create Popover with comfortable size
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 340, height: 380)
+        popover.contentSize = NSSize(width: 350, height: 490)
         popover.behavior = .transient
         let contentView = MenuBarView(state: stateManager, onQuit: {
             NSApp.terminate(nil)

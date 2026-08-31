@@ -399,9 +399,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         let width: CGFloat = config.mode == "toast" ? config.toastWidth : config.promptWidth
         let height: CGFloat = config.mode == "toast" ? config.toastHeight : config.promptHeight
 
-        // Calculate position at the top notch of the screen
+        // Calculate position at the top notch of the screen with clear margin
         let xPos = screenFrame.origin.x + (screenFrame.width - width) / 2
-        let yPos = hasNotch ? (screenFrame.origin.y + screenFrame.height - safeTop - height + 4) : (screenFrame.origin.y + screenFrame.height - height - 8)
+        let yPos = hasNotch ? (screenFrame.origin.y + screenFrame.height - safeTop - height - 8) : (screenFrame.origin.y + screenFrame.height - height - 12)
 
         let frame = NSRect(x: xPos, y: yPos, width: width, height: height)
 
