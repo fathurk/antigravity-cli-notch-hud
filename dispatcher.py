@@ -146,15 +146,22 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
         toast_sound = "none"
 
     if os.path.exists(bin_path):
-        subprocess.Popen([
-            bin_path,
-            "--mode", "toast",
-            "--title", title,
-            "--message", message,
-            "--sound", toast_sound
-        ])
+        subprocess.Popen(
+            [
+                bin_path,
+                "--mode", "toast",
+                "--title", title,
+                "--message", message,
+                "--sound", toast_sound
+            ],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            close_fds=True
+        )
 
     print(json.dumps({}))
+    sys.stdout.flush()
     sys.exit(0)
 
 def main():
@@ -203,14 +210,21 @@ def main():
             prompt_sound = "none"
 
         if os.path.exists(bin_path):
-            subprocess.Popen([
-                bin_path,
-                "--mode", "toast",
-                "--title", q_title,
-                "--message", q_msg,
-                "--sound", prompt_sound
-            ])
+            subprocess.Popen(
+                [
+                    bin_path,
+                    "--mode", "toast",
+                    "--title", q_title,
+                    "--message", q_msg,
+                    "--sound", prompt_sound
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
         print(json.dumps({"decision": "allow"}))
+        sys.stdout.flush()
         sys.exit(0)
 
     # Check if tool is safe / read-only -> Auto allow silently
