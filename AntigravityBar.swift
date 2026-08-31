@@ -445,10 +445,8 @@ struct MenuBarView: View {
                 .buttonStyle(PlainButtonStyle())
             }
         }
-        .padding(.horizontal, 16)
-        .padding(.top, 14)
-        .padding(.bottom, 14)
-        .frame(width: 350)
+        .padding(12)
+        .frame(width: 325)
         .background(Color(red: 0.06, green: 0.07, blue: 0.09).opacity(0.98))
     }
 }
@@ -471,10 +469,11 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             button.target = self
         }
 
-        // Create Popover with comfortable size
+        // Create Popover with dynamic auto-sizing
         popover = NSPopover()
-        popover.contentSize = NSSize(width: 350, height: 490)
+        popover.contentSize = NSSize(width: 325, height: 285)
         popover.behavior = .transient
+        popover.animates = true
         let contentView = MenuBarView(state: stateManager, onQuit: {
             NSApp.terminate(nil)
         })
@@ -502,6 +501,9 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         } else {
             stateManager.loadConfig()
             stateManager.reload()
+            // Dynamically adjust popover height based on pending approvals
+            let targetHeight: CGFloat = (stateManager.pendingRequest != nil) ? 415 : 285
+            popover.contentSize = NSSize(width: 325, height: targetHeight)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
         }
