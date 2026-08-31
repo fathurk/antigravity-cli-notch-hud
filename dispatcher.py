@@ -65,7 +65,7 @@ def is_safe_action(tool_name: str, args: dict) -> bool:
 
     if tool_name in ("write_to_file", "replace_file_content"):
         target = args.get("TargetFile", "")
-        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target:
+        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target or ".gemini/antigravity-cli/brain" in target or target.endswith(".md"):
             return True
 
     return False
