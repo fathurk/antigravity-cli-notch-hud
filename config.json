@@ -1,0 +1,19 @@
+{
+  "appearance" : {
+    "font_size_scale" : 1.2,
+    "notch_prompt_height" : 158,
+    "notch_prompt_width" : 480,
+    "notch_toast_height" : 46,
+    "notch_toast_width" : 380
+  },
+  "audio" : {
+    "prompt_sound" : "Glass",
+    "sound_enabled" : true,
+    "toast_sound" : "Hero"
+  },
+  "notifications" : {
+    "approval_timeout_seconds" : 5,
+    "enable_notch_popup" : true,
+    "toast_duration_seconds" : 3
+  }
+}
