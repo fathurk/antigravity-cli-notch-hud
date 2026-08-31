@@ -50,61 +50,40 @@ Never miss a permission approval prompt again while multitasking across other ma
 
 ---
 
-## 🚀 Getting Started
+## 🚀 1-Command Quick Installation
 
-### 1. Prerequisites
-- macOS 13 (Ventura) or later (Apple Silicon or Intel).
-- Built-in `swiftc` compiler (installed automatically with Xcode Command Line Tools: `xcode-select --install`).
-- Python 3.
+Clone and run the automated turnkey installer:
 
-### 2. Clone and Build
 ```bash
 git clone https://github.com/fathurk/antigravity-cli-notch-hud.git
 cd antigravity-cli-notch-hud
-bash build.sh
+./install.sh
 ```
 
-### 3. Start the Menu Bar App
+### What `install.sh` does automatically:
+1. 🔨 Compiles native Swift binaries (`notch-prompt` and `antigravity-bar`).
+2. ⚙️ Initializes `config.json` with optimal defaults (15s timeout, sounds enabled, font scale 1.0).
+3. 🔌 Automatically registers the lifecycle hooks into your global configuration (`~/.gemini/config/hooks.json`), making it immediately active across **all conversations, workspaces, and projects**.
+4. 🚀 Configures a macOS `LaunchAgent` so the top menu bar app starts automatically on Mac login.
+5. ⚡ Launches `AntigravityBar` immediately in your top menu bar.
+
+---
+
+## 🗑️ Clean Uninstallation
+
+To cleanly uninstall at any time:
+
 ```bash
-bash start.sh
-```
-To stop the Menu Bar app at any time:
-```bash
-bash stop.sh
+./uninstall.sh
 ```
 
 ---
 
-## 🔌 Hooking into Antigravity CLI
+## 🛠️ Manual Controls & Scripts
 
-Add the following lifecycle hooks to your project's `.agents/hooks.json` (or globally in `~/.gemini/config/hooks.json`):
-
-```json
-{
-  "mac-notch-hud": {
-    "enabled": true,
-    "PreToolUse": [
-      {
-        "matcher": "*",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "python3 /path/to/antigravity-cli-notch-hud/dispatcher.py",
-            "timeout": 90
-          }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "type": "command",
-        "command": "python3 /path/to/antigravity-cli-notch-hud/dispatcher.py --stop-hook",
-        "timeout": 10
-      }
-    ]
-  }
-}
-```
+- **Build**: `./build.sh`
+- **Start Menu Bar**: `./start.sh`
+- **Stop Menu Bar**: `./stop.sh`
 
 ---
 
