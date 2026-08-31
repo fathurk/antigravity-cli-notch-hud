@@ -9,7 +9,7 @@ import re
 SAFE_TOOLS = {
     "view_file", "grep_search", "list_dir", "find_by_name", 
     "read_url_content", "schedule", "manage_task", "send_message",
-    "ask_question", "invoke_subagent", "manage_subagents"
+    "invoke_subagent", "manage_subagents"
 }
 
 SAFE_COMMAND_PREFIXES = [
@@ -49,6 +49,8 @@ def load_config(script_dir: str) -> dict:
 
 def is_safe_command(cmd: str) -> bool:
     cmd_clean = cmd.strip()
+    if any(s in cmd_clean for s in ("start.sh", "stop.sh", "build.sh", "notch-hud", "antigravity-bar", "pkill")):
+        return True
     for prefix in SAFE_COMMAND_PREFIXES:
         if cmd_clean.startswith(prefix):
             return True
@@ -65,7 +67,7 @@ def is_safe_action(tool_name: str, args: dict) -> bool:
 
     if tool_name in ("write_to_file", "replace_file_content"):
         target = args.get("TargetFile", "")
-        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target or ".gemini/antigravity-cli/brain" in target or target.endswith(".md"):
+        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target or ".gemini/antigravity-cli/brain" in target or target.endswith(".md") or "tools/notch-hud" in target:
             return True
 
     return False
@@ -183,6 +185,33 @@ def main():
     tool_call = data.get("toolCall", {})
     tool_name = tool_call.get("name", "")
     tool_args = tool_call.get("args", {})
+
+    # Dedicated handler for ask_question: Show question toast and allow seamlessly
+    if tool_name == "ask_question":
+        q_list = tool_args.get("questions", [])
+        q_title = "❓ Question from Agent"
+        q_msg = "Please select your option in the chat window"
+        if q_list and isinstance(q_list, list):
+            first_q = q_list[0]
+            if isinstance(first_q, dict):
+                q_prompt = first_q.get("question", "")
+                if q_prompt:
+                    q_msg = f"{q_prompt[:60]}... • Reply in chat" if len(q_prompt) > 60 else f"{q_prompt} • Reply in chat"
+        
+        prompt_sound = config.get("audio", {}).get("prompt_sound", "Glass")
+        if not config.get("audio", {}).get("sound_enabled", True):
+            prompt_sound = "none"
+
+        if os.path.exists(bin_path):
+            subprocess.Popen([
+                bin_path,
+                "--mode", "toast",
+                "--title", q_title,
+                "--message", q_msg,
+                "--sound", prompt_sound
+            ])
+        print(json.dumps({"decision": "allow"}))
+        sys.exit(0)
 
     # Check if tool is safe / read-only -> Auto allow silently
     if is_safe_action(tool_name, tool_args):
