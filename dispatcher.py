@@ -12,12 +12,16 @@ SAFE_TOOLS = {
     "invoke_subagent", "manage_subagents"
 }
 
+SAFE_GIT_SUBCOMMANDS = {
+    "status", "diff", "log", "branch", "fetch", "show", "rev-parse",
+    "remote", "tag", "ls-files", "check-ignore", "pull", "describe",
+    "cat-file", "shortlog", "version", "help"
+}
+
 SAFE_COMMAND_PREFIXES = [
-    "git status", "git diff", "git log", "git branch", "git fetch",
-    "git show", "git rev-parse", "git remote", "git tag", "git ls-files",
-    "git check-ignore", "git pull",
-    "node -e", "python3 -c", "jq", "grep", "cat", "head", "tail", "wc",
+    "node -e", "python3 -c", "python -c", "jq", "grep", "rg", "cat", "head", "tail", "wc",
     "ls", "pwd", "diff", "stat", "awk", "which", "sw_vers", "swiftc", "swift",
+    "echo", "printf", "date", "uptime", "uname", "find", "fd",
     "notch-hud", "notch-prompt", "antigravity-bar"
 ]
 
@@ -44,19 +48,104 @@ def load_config(script_dir: str) -> dict:
             "font_size_scale": 1.0,
             "notch_prompt_width": 480,
             "notch_prompt_height": 158
+        },
+        "auto_approve": {
+            "enabled": False,
+            "duration_minutes": 15.0,
+            "expires_at": 0.0
         }
     }
 
-def is_safe_command(cmd: str) -> bool:
-    cmd_clean = cmd.strip()
-    if any(s in cmd_clean for s in ("start.sh", "stop.sh", "build.sh", "notch-hud", "antigravity-bar", "pkill")):
-        return True
-    for prefix in SAFE_COMMAND_PREFIXES:
-        if cmd_clean.startswith(prefix):
-            return True
+def is_safe_git_command(cmd: str) -> bool:
+    tokens = cmd.split()
+    if not tokens or tokens[0] != "git":
+        return False
+    i = 1
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok in ("-C", "-c", "--git-dir", "--work-tree", "--namespace"):
+            i += 2
+            continue
+        if tok.startswith("-"):
+            i += 1
+            continue
+        return tok in SAFE_GIT_SUBCOMMANDS
     return False
 
-def is_safe_action(tool_name: str, args: dict) -> bool:
+def is_safe_command(cmd: str) -> bool:
+    cmd_clean = cmd.strip()
+    if not cmd_clean:
+        return True
+    if any(s in cmd_clean for s in ("start.sh", "stop.sh", "build.sh", "notch-hud", "antigravity-bar", "pkill")):
+        return True
+    parts = re.split(r'\||&&|;', cmd_clean)
+    all_parts_safe = True
+    for p in parts:
+        p_clean = p.strip()
+        if not p_clean:
+            continue
+        if is_safe_git_command(p_clean):
+            continue
+        if any(p_clean.startswith(prefix) for prefix in SAFE_COMMAND_PREFIXES):
+            continue
+        all_parts_safe = False
+        break
+    if all_parts_safe and len(parts) > 0:
+        return True
+    return False
+
+def is_auto_approve_active(config: dict, script_dir: str) -> bool:
+    aa = config.get("auto_approve", {})
+    if not aa.get("enabled", False):
+        return False
+    expires_at = aa.get("expires_at", 0.0)
+    now = time.time()
+    if now >= expires_at:
+        # Expired! Auto-disable in config.json and restore notifications
+        aa["enabled"] = False
+        config.setdefault("notifications", {})["enable_notch_popup"] = True
+        try:
+            cfg_path = os.path.join(script_dir, "config.json")
+            with open(cfg_path, "w") as f:
+                json.dump(config, f, indent=2)
+        except Exception:
+            pass
+        return False
+    return True
+
+def is_artifact_requiring_review(tool_name: str, args: dict, input_data: dict = None) -> bool:
+    """
+    Check if a tool call creates or modifies an artifact or plan requiring user review.
+    Even when Auto-Approve mode is ON, these operations must still require manual user review.
+    """
+    # 1. write_to_file with ArtifactMetadata requesting feedback or user review
+    if tool_name == "write_to_file":
+        artifact_meta = args.get("ArtifactMetadata")
+        if artifact_meta and isinstance(artifact_meta, dict):
+            if artifact_meta.get("RequestFeedback", False) or artifact_meta.get("UserFacing", False):
+                return True
+
+    # 2. Files written or modified in brain / artifact directories or plan files
+    if tool_name in ("write_to_file", "replace_file_content"):
+        target = args.get("TargetFile", "")
+        basename = os.path.basename(target).lower()
+        if "plan" in basename:
+            return True
+        if ".gemini/antigravity-cli/brain" in target or ".gemini/antigravity/artifacts" in target:
+            if target.endswith(".md"):
+                return True
+        if input_data:
+            artifact_dir = input_data.get("artifactDirectoryPath", "")
+            if artifact_dir and target.startswith(artifact_dir) and target.endswith(".md"):
+                return True
+
+    return False
+
+def is_safe_action(tool_name: str, args: dict, input_data: dict = None) -> bool:
+    # Artifacts requiring review are never safe actions
+    if is_artifact_requiring_review(tool_name, args, input_data):
+        return False
+
     if tool_name in SAFE_TOOLS:
         return True
 
@@ -67,7 +156,7 @@ def is_safe_action(tool_name: str, args: dict) -> bool:
 
     if tool_name in ("write_to_file", "replace_file_content"):
         target = args.get("TargetFile", "")
-        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target or ".gemini/antigravity-cli/brain" in target or target.endswith(".md") or "tools/notch-hud" in target:
+        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target or "scratch/" in target or "tools/notch-hud" in target:
             return True
 
     return False
@@ -145,7 +234,8 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
     if not config.get("audio", {}).get("sound_enabled", True):
         toast_sound = "none"
 
-    if os.path.exists(bin_path):
+    enable_notch = config.get("notifications", {}).get("enable_notch_popup", True)
+    if enable_notch and os.path.exists(bin_path):
         subprocess.Popen(
             [
                 bin_path,
@@ -165,6 +255,15 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
     sys.exit(0)
 
 def main():
+    try:
+        _main_internal()
+    except Exception:
+        # Fail-safe: Always allow tool execution if any unexpected error occurs
+        print(json.dumps({"decision": "allow"}))
+        sys.stdout.flush()
+        sys.exit(0)
+
+def _main_internal():
     script_dir = os.path.dirname(os.path.realpath(__file__))
     bin_path = os.path.join(script_dir, "bin", "notch-prompt")
     state_dir = os.path.join(script_dir, "state")
@@ -227,13 +326,33 @@ def main():
         sys.stdout.flush()
         sys.exit(0)
 
+    is_artifact = is_artifact_requiring_review(tool_name, tool_args, data)
+    auto_approve_active = is_auto_approve_active(config, script_dir)
+
     # Check if tool is safe / read-only -> Auto allow silently
-    if is_safe_action(tool_name, tool_args):
+    if not is_artifact and is_safe_action(tool_name, tool_args, data):
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
     description, action_code = extract_action_details(tool_name, tool_args)
+    if is_artifact:
+        description = f"📋 Artifact Review: {description}"
     req_id = f"req-{int(time.time() * 1000)}"
+
+    # If Auto-Approve is ON and NOT an artifact requiring review -> Auto allow immediately!
+    if auto_approve_active and not is_artifact:
+        append_to_history(state_dir, {
+            "id": req_id,
+            "tool": tool_name,
+            "description": description,
+            "action": action_code,
+            "decision": "allow",
+            "auto_approved": True,
+            "timestamp": time.time()
+        })
+        print(json.dumps({"decision": "allow"}))
+        sys.stdout.flush()
+        sys.exit(0)
 
     # 1. Clean previous decision file
     if os.path.exists(decision_file):
@@ -245,7 +364,7 @@ def main():
     # 2. Write pending request to state for Menu Bar App
     pending_payload = {
         "id": req_id,
-        "tool": tool_name,
+        "tool": f"{tool_name} (Artifact Review)" if is_artifact else tool_name,
         "description": description,
         "action": action_code,
         "timestamp": time.time()
@@ -275,11 +394,9 @@ def main():
     # 4. Wait for decision from either Menu Bar or Notch HUD
     decision = None
     start_time = time.time()
-    # Global hook wait timeout (e.g. 10 minutes)
     max_wait_seconds = 600.0
 
     while time.time() - start_time < max_wait_seconds:
-        # Check if decision was written via Menu Bar app
         if os.path.exists(decision_file):
             try:
                 with open(decision_file, "r") as f:
@@ -290,7 +407,6 @@ def main():
             except Exception:
                 pass
 
-        # Check if Notch HUD process responded
         if proc and proc.poll() is not None:
             stdout, _ = proc.communicate()
             match = re.search(r'\{.*\}', stdout)
@@ -309,7 +425,6 @@ def main():
                 decision = "deny"
                 break
             elif notch_decision == "dismiss" or proc.returncode == 2:
-                # Notch HUD dismissed after timeout -> Keep waiting in Menu Bar!
                 proc = None
 
         time.sleep(0.15)
@@ -317,7 +432,6 @@ def main():
     if decision is None:
         decision = "deny"
 
-    # Clean up
     if proc and proc.poll() is None:
         try:
             proc.terminate()
@@ -336,7 +450,6 @@ def main():
         except Exception:
             pass
 
-    # Save to history
     append_to_history(state_dir, {
         "id": req_id,
         "tool": tool_name,

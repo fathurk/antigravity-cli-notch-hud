@@ -14,7 +14,10 @@ Never miss a permission approval prompt again while multitasking across other ma
 - ⌨️ **Keyboard-First & 1-Click Approvals**:
   - <kbd>Return</kbd> / <kbd>Space</kbd> or click **[✓ Approve]** ➔ Agent continues execution immediately.
   - <kbd>Esc</kbd> or click **[✗ Deny]** ➔ Agent halts tool execution.
-- ⚙️ **Interactive GUI Toggles**: Toggle Notch popup ON/OFF, mute/unmute audio chimes, adjust font scaling (S/M/L), and choose auto-dismiss timeouts (`5s` / `15s` / `30s`) directly in the Menu Bar dropdown.
+- 🛡️ **Temporary Auto-Approve Mode (with Auto-Timeout)**: Auto-approve repetitive terminal commands and code modifications for a configurable duration (`5m`, `15m`, `30m`, `60m`) with live countdown timer and menu bar indicator (`⚡🟢 (14m)`). Automatically switches back to disabled after duration elapses.
+- 📋 **Artifact Review Safety Gate**: Plan and implementation artifacts (e.g. `/plan` mode or files requiring feedback) are strictly excluded from auto-approval, ensuring you always review plans before they run.
+- ⚙️ **Interactive GUI Toggles**: Toggle Auto-Approve ON/OFF, Notch popup ON/OFF, mute/unmute audio chimes, adjust font scaling (S/M/L), and choose timeouts directly in the Menu Bar dropdown.
+- 💻 **Terminal Shortcut (`./auto-approve.sh`)**: Quick shell command to toggle or check auto-approve status (`on [minutes]`, `off`, `status`).
 - 📄 **Single JSON Configuration (`config.json`)**: All preferences stored in a clean, human-editable JSON configuration file with live auto-reloading.
 - 🚀 **Zero Third-Party Dependencies**: Pure native Swift 6 + AppKit/SwiftUI compiled directly with Apple's built-in `swiftc`.
 
