@@ -98,7 +98,11 @@ def is_auto_approve_active(config: dict, script_dir: str) -> bool:
     aa = config.get("auto_approve", {})
     if not aa.get("enabled", False):
         return False
+    duration_mins = aa.get("duration_minutes", 15.0)
     expires_at = aa.get("expires_at", 0.0)
+    # Unlimited / no time limit when duration_minutes == 0 or expires_at <= 0
+    if duration_mins == 0 or expires_at <= 0.0:
+        return True
     now = time.time()
     if now >= expires_at:
         # Expired! Auto-disable in config.json and restore notifications
@@ -112,40 +116,7 @@ def is_auto_approve_active(config: dict, script_dir: str) -> bool:
             pass
         return False
     return True
-
-def is_artifact_requiring_review(tool_name: str, args: dict, input_data: dict = None) -> bool:
-    """
-    Check if a tool call creates or modifies an artifact or plan requiring user review.
-    Even when Auto-Approve mode is ON, these operations must still require manual user review.
-    """
-    # 1. write_to_file with ArtifactMetadata requesting feedback or user review
-    if tool_name == "write_to_file":
-        artifact_meta = args.get("ArtifactMetadata")
-        if artifact_meta and isinstance(artifact_meta, dict):
-            if artifact_meta.get("RequestFeedback", False) or artifact_meta.get("UserFacing", False):
-                return True
-
-    # 2. Files written or modified in brain / artifact directories or plan files
-    if tool_name in ("write_to_file", "replace_file_content"):
-        target = args.get("TargetFile", "")
-        basename = os.path.basename(target).lower()
-        if "plan" in basename:
-            return True
-        if ".gemini/antigravity-cli/brain" in target or ".gemini/antigravity/artifacts" in target:
-            if target.endswith(".md"):
-                return True
-        if input_data:
-            artifact_dir = input_data.get("artifactDirectoryPath", "")
-            if artifact_dir and target.startswith(artifact_dir) and target.endswith(".md"):
-                return True
-
-    return False
-
 def is_safe_action(tool_name: str, args: dict, input_data: dict = None) -> bool:
-    # Artifacts requiring review are never safe actions
-    if is_artifact_requiring_review(tool_name, args, input_data):
-        return False
-
     if tool_name in SAFE_TOOLS:
         return True
 
@@ -155,8 +126,31 @@ def is_safe_action(tool_name: str, args: dict, input_data: dict = None) -> bool:
             return True
 
     if tool_name in ("write_to_file", "replace_file_content"):
+        # Artifact creation with ArtifactMetadata
+        if args.get("ArtifactMetadata"):
+            return True
+
         target = args.get("TargetFile", "")
-        if "PLAN_LOG.md" in target or "state/" in target or "config.json" in target or "scratch/" in target or "tools/notch-hud" in target:
+        basename = os.path.basename(target).lower()
+
+        # Plan logs, progress logs, task logs
+        if "plan_log" in basename or "plan-log" in basename or "plan.md" in basename or basename == "plan_log.md":
+            return True
+
+        # Internal state, config, scratch, tools/notch-hud
+        if "state/" in target or "config.json" in target or "scratch/" in target or "tools/notch-hud" in target:
+            return True
+
+        # Brain / artifact directories
+        if ".gemini/antigravity-cli/brain" in target or ".gemini/antigravity/artifacts" in target:
+            return True
+        if input_data:
+            artifact_dir = input_data.get("artifactDirectoryPath", "")
+            if artifact_dir and target.startswith(artifact_dir):
+                return True
+
+        # All markdown documentation and notes files
+        if target.endswith(".md"):
             return True
 
     return False
@@ -215,18 +209,34 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
 
     title = "Antigravity CLI"
     message = "✨ Task completed • Waiting for your input"
+    recent_plan = None
 
     if raw_input.strip():
         try:
             data = json.loads(raw_input)
             artifact_dir = data.get("artifactDirectoryPath", "")
             if artifact_dir and os.path.exists(artifact_dir):
-                plan_file = os.path.join(artifact_dir, "plan.md")
-                if os.path.exists(plan_file):
-                    mtime = os.path.getmtime(plan_file)
-                    if (time.time() - mtime) < 45:
+                latest_mtime = 0
+                for fname in os.listdir(artifact_dir):
+                    if fname.endswith(".md"):
+                        fpath = os.path.join(artifact_dir, fname)
+                        try:
+                            mtime = os.path.getmtime(fpath)
+                            if (time.time() - mtime) < 60 and mtime > latest_mtime:
+                                latest_mtime = mtime
+                                recent_plan = fname
+                        except Exception:
+                            pass
+                if recent_plan:
+                    if "plan" in recent_plan.lower():
                         title = "Antigravity Plan Ready"
-                        message = "📋 Plan is ready • Click Proceed in UI or type /build"
+                        message = "📋 Plan is ready • Review & Click Proceed in UI"
+                    elif "walkthrough" in recent_plan.lower():
+                        title = "Walkthrough Ready"
+                        message = "📋 Walkthrough ready • Review in UI"
+                    else:
+                        title = "Artifact Ready"
+                        message = f"📋 {recent_plan} ready • Review in UI"
         except Exception:
             pass
 
@@ -235,20 +245,31 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
         toast_sound = "none"
 
     enable_notch = config.get("notifications", {}).get("enable_notch_popup", True)
-    if enable_notch and os.path.exists(bin_path):
-        subprocess.Popen(
-            [
-                bin_path,
-                "--mode", "toast",
-                "--title", title,
-                "--message", message,
-                "--sound", toast_sound
-            ],
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-            stdin=subprocess.DEVNULL,
-            close_fds=True
-        )
+    sound_enabled = config.get("audio", {}).get("sound_enabled", True)
+
+    if os.path.exists(bin_path):
+        if enable_notch or recent_plan:
+            subprocess.Popen(
+                [
+                    bin_path,
+                    "--mode", "toast",
+                    "--title", title,
+                    "--message", message,
+                    "--sound", toast_sound
+                ],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
+        elif sound_enabled and toast_sound != "none":
+            subprocess.Popen(
+                ["afplay", f"/System/Library/Sounds/{toast_sound}.aiff"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                close_fds=True
+            )
 
     print(json.dumps({}))
     sys.stdout.flush()
@@ -326,21 +347,18 @@ def _main_internal():
         sys.stdout.flush()
         sys.exit(0)
 
-    is_artifact = is_artifact_requiring_review(tool_name, tool_args, data)
     auto_approve_active = is_auto_approve_active(config, script_dir)
 
-    # Check if tool is safe / read-only -> Auto allow silently
-    if not is_artifact and is_safe_action(tool_name, tool_args, data):
+    # Check if tool is safe / read-only / artifact creation -> Auto allow silently
+    if is_safe_action(tool_name, tool_args, data):
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 
     description, action_code = extract_action_details(tool_name, tool_args)
-    if is_artifact:
-        description = f"📋 Artifact Review: {description}"
     req_id = f"req-{int(time.time() * 1000)}"
 
-    # If Auto-Approve is ON and NOT an artifact requiring review -> Auto allow immediately!
-    if auto_approve_active and not is_artifact:
+    # If Auto-Approve is ON -> Auto allow immediately!
+    if auto_approve_active:
         append_to_history(state_dir, {
             "id": req_id,
             "tool": tool_name,
@@ -364,7 +382,7 @@ def _main_internal():
     # 2. Write pending request to state for Menu Bar App
     pending_payload = {
         "id": req_id,
-        "tool": f"{tool_name} (Artifact Review)" if is_artifact else tool_name,
+        "tool": tool_name,
         "description": description,
         "action": action_code,
         "timestamp": time.time()

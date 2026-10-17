@@ -135,14 +135,20 @@ class AppStateManager: ObservableObject {
     }
 
     var isAutoApproveActive: Bool {
-        return config.auto_approve.enabled && (Date().timeIntervalSince1970 < config.auto_approve.expires_at)
+        if !config.auto_approve.enabled { return false }
+        if config.auto_approve.duration_minutes == 0 { return true }
+        return Date().timeIntervalSince1970 < config.auto_approve.expires_at
     }
 
     var autoApproveRemainingSeconds: Double {
+        if config.auto_approve.duration_minutes == 0 { return Double.infinity }
         return max(0, config.auto_approve.expires_at - Date().timeIntervalSince1970)
     }
 
     var formattedRemainingTime: String {
+        if config.auto_approve.duration_minutes == 0 {
+            return "No limit (∞)"
+        }
         let secs = Int(autoApproveRemainingSeconds)
         let mins = secs / 60
         let remSecs = secs % 60
@@ -160,8 +166,12 @@ class AppStateManager: ObservableObject {
             config.notifications.enable_notch_popup = true
         } else {
             config.auto_approve.enabled = true
-            let durationSecs = (config.auto_approve.duration_minutes > 0 ? config.auto_approve.duration_minutes : 15.0) * 60.0
-            config.auto_approve.expires_at = Date().timeIntervalSince1970 + durationSecs
+            if config.auto_approve.duration_minutes == 0 {
+                config.auto_approve.expires_at = 0.0
+            } else {
+                let durationSecs = (config.auto_approve.duration_minutes > 0 ? config.auto_approve.duration_minutes : 15.0) * 60.0
+                config.auto_approve.expires_at = Date().timeIntervalSince1970 + durationSecs
+            }
             config.notifications.enable_notch_popup = false
         }
         saveConfig()
@@ -170,14 +180,18 @@ class AppStateManager: ObservableObject {
     func setAutoApproveDuration(_ minutes: Double) {
         config.auto_approve.duration_minutes = minutes
         if isAutoApproveActive {
-            config.auto_approve.expires_at = Date().timeIntervalSince1970 + (minutes * 60.0)
+            if minutes == 0 {
+                config.auto_approve.expires_at = 0.0
+            } else {
+                config.auto_approve.expires_at = Date().timeIntervalSince1970 + (minutes * 60.0)
+            }
         }
         saveConfig()
     }
 
     func reload() {
-        // Auto-expire auto approve if duration elapsed
-        if config.auto_approve.enabled && Date().timeIntervalSince1970 >= config.auto_approve.expires_at {
+        // Auto-expire auto approve if duration elapsed (and not unlimited)
+        if config.auto_approve.enabled && config.auto_approve.duration_minutes > 0 && config.auto_approve.expires_at > 0 && Date().timeIntervalSince1970 >= config.auto_approve.expires_at {
             config.auto_approve.enabled = false
             config.notifications.enable_notch_popup = true
             saveConfig()
@@ -406,7 +420,7 @@ struct MenuBarView: View {
                         Circle()
                             .fill(Color.green)
                             .frame(width: 6, height: 6)
-                        Text("Active: \(state.formattedRemainingTime) remaining")
+                        Text(state.config.auto_approve.duration_minutes == 0 ? "Active: Unlimited (No time limit) ⚡" : "Active: \(state.formattedRemainingTime) remaining")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
                     }
@@ -420,11 +434,11 @@ struct MenuBarView: View {
                     }
 
                     HStack(spacing: 4) {
-                        Text("🛡️")
+                        Text("📋")
                             .font(.system(size: 9))
-                        Text("Artifacts & plans still require review")
+                        Text("Artifact creation auto • Plans reviewed in UI")
                             .font(.system(size: 9, weight: .medium))
-                            .foregroundColor(Color.orange.opacity(0.9))
+                            .foregroundColor(Color(red: 0.75, green: 0.85, blue: 1.0))
                     }
                 }
                 .padding(6)
@@ -433,23 +447,23 @@ struct MenuBarView: View {
                 .cornerRadius(5)
             } else {
                 HStack(spacing: 4) {
-                    Text("Auto-approve commands & edits • 🔔 Notifs ON")
+                    Text(state.config.auto_approve.duration_minutes == 0 ? "Auto-approve commands & edits • No time limit (∞)" : "Auto-approve commands & edits • 🔔 Notifs ON")
                         .font(.system(size: 10, weight: .regular))
                         .foregroundColor(.gray)
                 }
             }
 
             HStack {
-                Text("⏱ Active Duration")
+                Text("⏱ Duration")
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(.white.opacity(0.8))
                 Spacer()
                 HStack(spacing: 4) {
-                    ForEach([5.0, 15.0, 30.0, 60.0], id: \.self) { duration in
+                    ForEach([5.0, 15.0, 30.0, 60.0, 0.0], id: \.self) { duration in
                         Button(action: { state.setAutoApproveDuration(duration) }) {
-                            Text("\(Int(duration))m")
-                                .font(.system(size: 9, weight: .bold, design: .monospaced))
-                                .padding(.horizontal, 5)
+                            Text(duration == 0 ? "∞" : "\(Int(duration))m")
+                                .font(.system(size: duration == 0 ? 11 : 9, weight: .bold, design: duration == 0 ? .default : .monospaced))
+                                .padding(.horizontal, duration == 0 ? 6 : 5)
                                 .padding(.vertical, 3)
                                 .background(state.config.auto_approve.duration_minutes == duration ? Color.cyan.opacity(0.35) : Color.gray.opacity(0.15))
                                 .foregroundColor(state.config.auto_approve.duration_minutes == duration ? .cyan : .gray)
@@ -670,8 +684,12 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         if stateManager.pendingRequest != nil {
             button.title = "⚡ (1)"
         } else if stateManager.isAutoApproveActive {
-            let mins = max(1, Int(ceil(stateManager.autoApproveRemainingSeconds / 60.0)))
-            button.title = "⚡🟢 (\(mins)m)"
+            if stateManager.config.auto_approve.duration_minutes == 0 {
+                button.title = "⚡🟢 (∞)"
+            } else {
+                let mins = max(1, Int(ceil(stateManager.autoApproveRemainingSeconds / 60.0)))
+                button.title = "⚡🟢 (\(mins)m)"
+            }
         } else {
             button.title = "⚡ AGY"
         }

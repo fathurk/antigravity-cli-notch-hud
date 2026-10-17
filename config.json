@@ -12,7 +12,7 @@
     "toast_sound": "Hero"
   },
   "auto_approve": {
-    "duration_minutes": 15,
+    "duration_minutes": 15.0,
     "enabled": false,
     "expires_at": 0.0
   },
