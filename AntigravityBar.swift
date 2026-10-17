@@ -64,9 +64,33 @@ struct HistoryItem: Codable, Identifiable {
     }
 }
 
+struct ArtifactItem: Codable, Identifiable, Equatable {
+    var id: String
+    var name: String
+    var path: String
+    var summary: String
+    var requestFeedback: Bool
+    var updatedAt: Double
+    var status: String?
+
+    static func == (lhs: ArtifactItem, rhs: ArtifactItem) -> Bool {
+        return lhs.id == rhs.id && lhs.updatedAt == rhs.updatedAt && lhs.status == rhs.status
+    }
+
+    var relativeTime: String {
+        let diff = Date().timeIntervalSince1970 - updatedAt
+        if diff < 60 { return "Just now" }
+        let mins = Int(diff / 60)
+        if mins < 60 { return "\(mins)m ago" }
+        let hours = Int(mins / 60)
+        return "\(hours)h ago"
+    }
+}
+
 // MARK: - App State Manager
 class AppStateManager: ObservableObject {
     @Published var pendingRequest: PendingRequest? = nil
+    @Published var pendingArtifacts: [ArtifactItem] = []
     @Published var history: [HistoryItem] = []
     @Published var config: ConfigJSON = ConfigJSON()
 
@@ -76,6 +100,7 @@ class AppStateManager: ObservableObject {
     let pendingFile: URL
     let decisionFile: URL
     let historyFile: URL
+    let artifactsFile: URL
 
     private var timer: Timer?
 
@@ -87,6 +112,7 @@ class AppStateManager: ObservableObject {
         self.pendingFile = stateDir.appendingPathComponent("pending.json")
         self.decisionFile = stateDir.appendingPathComponent("decision.json")
         self.historyFile = stateDir.appendingPathComponent("history.json")
+        self.artifactsFile = stateDir.appendingPathComponent("artifacts.json")
 
         try? FileManager.default.createDirectory(at: stateDir, withIntermediateDirectories: true)
         loadConfig()
@@ -216,6 +242,48 @@ class AppStateManager: ObservableObject {
            let hist = try? JSONDecoder().decode([HistoryItem].self, from: data) {
             self.history = hist.reversed()
         }
+
+        // Load pending artifacts
+        if FileManager.default.fileExists(atPath: artifactsFile.path),
+           let data = try? Data(contentsOf: artifactsFile),
+           let items = try? JSONDecoder().decode([ArtifactItem].self, from: data) {
+            let pending = items.filter { $0.requestFeedback || $0.status == "pending_review" }
+            if self.pendingArtifacts != pending {
+                self.pendingArtifacts = pending
+            }
+        } else {
+            if !self.pendingArtifacts.isEmpty {
+                self.pendingArtifacts = []
+            }
+        }
+    }
+
+    func openArtifactReviewer(path: String) {
+        let binPath = baseDir.appendingPathComponent("bin/artifact-reviewer")
+        let p = Process()
+        p.executableURL = binPath
+        p.arguments = [path]
+        try? p.run()
+    }
+
+    func markArtifactProceed(path: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString("proceed", forType: .string)
+
+        if FileManager.default.fileExists(atPath: artifactsFile.path),
+           let data = try? Data(contentsOf: artifactsFile),
+           var items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
+            for i in 0..<items.count {
+                if let p = items[i]["path"] as? String, p == path {
+                    items[i]["status"] = "reviewed"
+                    items[i]["requestFeedback"] = false
+                }
+            }
+            if let enc = try? JSONSerialization.data(withJSONObject: items, options: .prettyPrinted) {
+                try? enc.write(to: artifactsFile)
+            }
+        }
+        reload()
     }
 
     func approve(request: PendingRequest) {
@@ -255,6 +323,11 @@ struct MenuBarView: View {
                 Divider().background(Color.white.opacity(0.15))
             }
 
+            if !state.pendingArtifacts.isEmpty {
+                pendingArtifactsSection
+                Divider().background(Color.white.opacity(0.15))
+            }
+
             autoApproveSection
             Divider().background(Color.white.opacity(0.15))
 
@@ -286,9 +359,9 @@ struct MenuBarView: View {
         HStack {
             HStack(spacing: 6) {
                 Circle()
-                    .fill(state.pendingRequest != nil ? Color.orange : Color.green)
+                    .fill(state.pendingRequest != nil ? Color.orange : (!state.pendingArtifacts.isEmpty ? Color.cyan : Color.green))
                     .frame(width: 8, height: 8)
-                    .shadow(color: (state.pendingRequest != nil ? Color.orange : Color.green).opacity(0.6), radius: 3)
+                    .shadow(color: (state.pendingRequest != nil ? Color.orange : (!state.pendingArtifacts.isEmpty ? Color.cyan : Color.green)).opacity(0.6), radius: 3)
 
                 Text("Antigravity CLI")
                     .font(.system(size: 13, weight: .bold, design: .rounded))
@@ -304,6 +377,14 @@ struct MenuBarView: View {
                     .padding(.vertical, 2)
                     .background(Color.orange.opacity(0.25))
                     .foregroundColor(.orange)
+                    .cornerRadius(4)
+            } else if !state.pendingArtifacts.isEmpty {
+                Text("\(state.pendingArtifacts.count) Review")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Color.cyan.opacity(0.25))
+                    .foregroundColor(.cyan)
                     .cornerRadius(4)
             } else {
                 Text("Idle")
@@ -384,6 +465,91 @@ struct MenuBarView: View {
             .background(Color.orange.opacity(0.08))
             .cornerRadius(8)
             .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.orange.opacity(0.3), lineWidth: 1))
+        }
+    }
+
+    private var pendingArtifactsSection: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Text("📋 PENDING ARTIFACTS (\(state.pendingArtifacts.count))")
+                    .font(.system(size: 10, weight: .bold, design: .monospaced))
+                    .foregroundColor(.cyan)
+
+                Spacer()
+
+                Button(action: {
+                    if let first = state.pendingArtifacts.first {
+                        state.openArtifactReviewer(path: first.path)
+                    }
+                }) {
+                    Text("Review All")
+                        .font(.system(size: 9, weight: .bold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.blue.opacity(0.3))
+                        .foregroundColor(Color.cyan)
+                        .cornerRadius(3)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
+
+            ForEach(state.pendingArtifacts.prefix(2)) { item in
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(spacing: 5) {
+                        Text("📋")
+                            .font(.system(size: 10))
+                        Text(item.name)
+                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .foregroundColor(.white)
+                        Spacer()
+                        Text(item.relativeTime)
+                            .font(.system(size: 9))
+                            .foregroundColor(.gray)
+                    }
+
+                    if !item.summary.isEmpty {
+                        Text(item.summary)
+                            .font(.system(size: 10))
+                            .foregroundColor(.white.opacity(0.85))
+                            .lineLimit(2)
+                    }
+
+                    HStack(spacing: 8) {
+                        Button(action: { state.openArtifactReviewer(path: item.path) }) {
+                            HStack(spacing: 3) {
+                                Text("👁")
+                                Text("Review")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color.blue)
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+
+                        Button(action: { state.markArtifactProceed(path: item.path) }) {
+                            HStack(spacing: 3) {
+                                Text("✓")
+                                Text("Proceed")
+                                    .font(.system(size: 10, weight: .bold))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(red: 0.08, green: 0.55, blue: 0.28))
+                            .foregroundColor(.white)
+                            .cornerRadius(4)
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                    .padding(.top, 2)
+                }
+                .padding(8)
+                .background(Color.cyan.opacity(0.06))
+                .cornerRadius(6)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.cyan.opacity(0.25), lineWidth: 1))
+            }
         }
     }
 
@@ -683,6 +849,8 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         guard let button = statusItem.button else { return }
         if stateManager.pendingRequest != nil {
             button.title = "⚡ (1)"
+        } else if !stateManager.pendingArtifacts.isEmpty {
+            button.title = "⚡📋 (\(stateManager.pendingArtifacts.count))"
         } else if stateManager.isAutoApproveActive {
             if stateManager.config.auto_approve.duration_minutes == 0 {
                 button.title = "⚡🟢 (∞)"
@@ -705,7 +873,17 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             stateManager.reload()
 
             let width: CGFloat = 330
-            let targetHeight: CGFloat = (stateManager.pendingRequest != nil) ? 585 : (stateManager.history.isEmpty ? 435 : 505)
+            var targetHeight: CGFloat = 435
+            if stateManager.pendingRequest != nil {
+                targetHeight += 125
+            }
+            if !stateManager.pendingArtifacts.isEmpty {
+                targetHeight += CGFloat(min(2, stateManager.pendingArtifacts.count)) * 85
+            }
+            if !stateManager.history.isEmpty {
+                targetHeight += 70
+            }
+            targetHeight = min(680, targetHeight)
 
             // Calculate exact screen position directly below the status bar icon
             let buttonScreenRect = buttonWindow.convertToScreen(button.bounds)

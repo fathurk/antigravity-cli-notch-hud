@@ -345,10 +345,37 @@ struct NotchToastView: View {
             }
 
             Spacer()
+
+            if config.title.contains("Plan") || config.title.contains("Artifact") || config.action.hasSuffix(".md") {
+                Button(action: {
+                    let exeDir = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).deletingLastPathComponent()
+                    let reviewerBin = exeDir.appendingPathComponent("artifact-reviewer")
+                    let process = Process()
+                    process.executableURL = reviewerBin
+                    if !config.action.isEmpty && config.action != "none" {
+                        process.arguments = [config.action]
+                    }
+                    try? process.run()
+                    onDismiss()
+                }) {
+                    HStack(spacing: 3) {
+                        Text("👁")
+                            .font(.system(size: 10 * config.fontScale))
+                        Text("Review")
+                            .font(.system(size: 10 * config.fontScale, weight: .bold))
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3.5)
+                    .background(Color.blue)
+                    .foregroundColor(.white)
+                    .cornerRadius(5)
+                }
+                .buttonStyle(PlainButtonStyle())
+            }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .frame(width: config.toastWidth, height: config.toastHeight)
+        .frame(width: (config.title.contains("Plan") || config.action.hasSuffix(".md")) ? max(430, config.toastWidth) : config.toastWidth, height: config.toastHeight)
         .background(
             ZStack {
                 Color(red: 0.04, green: 0.04, blue: 0.06).opacity(0.96)

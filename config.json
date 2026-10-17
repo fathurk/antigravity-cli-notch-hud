@@ -1,24 +1,24 @@
 {
-  "appearance": {
-    "font_size_scale": 1,
-    "notch_prompt_height": 158,
-    "notch_prompt_width": 480,
-    "notch_toast_height": 46,
-    "notch_toast_width": 380
+  "appearance" : {
+    "font_size_scale" : 1,
+    "notch_prompt_height" : 158,
+    "notch_prompt_width" : 480,
+    "notch_toast_height" : 46,
+    "notch_toast_width" : 380
   },
-  "audio": {
-    "prompt_sound": "Glass",
-    "sound_enabled": true,
-    "toast_sound": "Hero"
+  "audio" : {
+    "prompt_sound" : "Glass",
+    "sound_enabled" : true,
+    "toast_sound" : "Hero"
   },
-  "auto_approve": {
-    "duration_minutes": 15.0,
-    "enabled": false,
-    "expires_at": 0.0
+  "auto_approve" : {
+    "duration_minutes" : 0,
+    "enabled" : true,
+    "expires_at" : 0
   },
-  "notifications": {
-    "approval_timeout_seconds": 30,
-    "enable_notch_popup": true,
-    "toast_duration_seconds": 3
+  "notifications" : {
+    "approval_timeout_seconds" : 30,
+    "enable_notch_popup" : false,
+    "toast_duration_seconds" : 3
   }
 }

@@ -116,6 +116,86 @@ def is_auto_approve_active(config: dict, script_dir: str) -> bool:
             pass
         return False
     return True
+
+def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_file: str = None, metadata: dict = None):
+    state_dir = os.path.join(script_dir, "state")
+    os.makedirs(state_dir, exist_ok=True)
+    artifacts_path = os.path.join(state_dir, "artifacts.json")
+
+    existing_items = []
+    if os.path.exists(artifacts_path):
+        try:
+            with open(artifacts_path, "r") as f:
+                existing_items = json.load(f)
+        except Exception:
+            existing_items = []
+
+    items_by_path = {item["path"]: item for item in existing_items if isinstance(item, dict) and "path" in item}
+
+    if target_file and target_file.endswith(".md"):
+        fname = os.path.basename(target_file)
+        req_feedback = False
+        summary = ""
+        if metadata:
+            req_feedback = metadata.get("RequestFeedback", metadata.get("requestFeedback", False))
+            summary = metadata.get("Summary", metadata.get("summary", ""))
+        elif "plan" in fname.lower():
+            req_feedback = True
+            summary = "Plan artifact ready for review"
+
+        items_by_path[target_file] = {
+            "id": fname,
+            "name": fname,
+            "path": target_file,
+            "summary": summary,
+            "requestFeedback": req_feedback,
+            "updatedAt": time.time(),
+            "status": "pending_review" if req_feedback else "completed"
+        }
+
+    if artifact_dir and os.path.exists(artifact_dir):
+        for fname in os.listdir(artifact_dir):
+            if fname.endswith(".md") and not fname.startswith("."):
+                fpath = os.path.join(artifact_dir, fname)
+                meta_path = fpath + ".metadata.json"
+                req_feedback = ("plan" in fname.lower())
+                summary = ""
+                if os.path.exists(meta_path):
+                    try:
+                        with open(meta_path, "r") as mf:
+                            mdata = json.load(mf)
+                            req_feedback = mdata.get("requestFeedback", req_feedback)
+                            summary = mdata.get("summary", summary)
+                    except Exception:
+                        pass
+                try:
+                    mtime = os.path.getmtime(fpath)
+                except Exception:
+                    mtime = time.time()
+
+                prev_status = items_by_path.get(fpath, {}).get("status")
+                new_status = "pending_review" if req_feedback else "completed"
+                if prev_status == "reviewed" and not req_feedback:
+                    new_status = "reviewed"
+
+                items_by_path[fpath] = {
+                    "id": fname,
+                    "name": fname,
+                    "path": fpath,
+                    "summary": summary,
+                    "requestFeedback": req_feedback,
+                    "updatedAt": mtime,
+                    "status": new_status
+                }
+
+    sorted_items = sorted(items_by_path.values(), key=lambda x: x.get("updatedAt", 0), reverse=True)
+    try:
+        with open(artifacts_path, "w") as f:
+            json.dump(sorted_items, f, indent=2)
+    except Exception:
+        pass
+    return sorted_items
+
 def is_safe_action(tool_name: str, args: dict, input_data: dict = None) -> bool:
     if tool_name in SAFE_TOOLS:
         return True
@@ -210,33 +290,32 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
     title = "Antigravity CLI"
     message = "✨ Task completed • Waiting for your input"
     recent_plan = None
+    plan_path = ""
 
     if raw_input.strip():
         try:
             data = json.loads(raw_input)
             artifact_dir = data.get("artifactDirectoryPath", "")
             if artifact_dir and os.path.exists(artifact_dir):
-                latest_mtime = 0
-                for fname in os.listdir(artifact_dir):
-                    if fname.endswith(".md"):
-                        fpath = os.path.join(artifact_dir, fname)
-                        try:
-                            mtime = os.path.getmtime(fpath)
-                            if (time.time() - mtime) < 60 and mtime > latest_mtime:
-                                latest_mtime = mtime
-                                recent_plan = fname
-                        except Exception:
-                            pass
-                if recent_plan:
-                    if "plan" in recent_plan.lower():
+                artifacts = update_artifacts_state(script_dir, artifact_dir)
+                for item in artifacts:
+                    if item.get("requestFeedback") or (time.time() - item.get("updatedAt", 0) < 120 and "plan" in item.get("name", "").lower()):
+                        recent_plan = item["name"]
+                        plan_path = item["path"]
                         title = "Antigravity Plan Ready"
-                        message = "📋 Plan is ready • Review & Click Proceed in UI"
-                    elif "walkthrough" in recent_plan.lower():
-                        title = "Walkthrough Ready"
-                        message = "📋 Walkthrough ready • Review in UI"
-                    else:
-                        title = "Artifact Ready"
-                        message = f"📋 {recent_plan} ready • Review in UI"
+                        message = "📋 Plan ready • Click Review in Toast/Menu Bar"
+                        break
+                if not recent_plan and artifacts:
+                    latest = artifacts[0]
+                    if time.time() - latest.get("updatedAt", 0) < 60:
+                        recent_plan = latest["name"]
+                        plan_path = latest["path"]
+                        if "walkthrough" in latest["name"].lower():
+                            title = "Walkthrough Ready"
+                            message = "📋 Walkthrough ready • Click Review"
+                        else:
+                            title = "Artifact Ready"
+                            message = f"📋 {latest['name']} ready • Click Review"
         except Exception:
             pass
 
@@ -249,14 +328,17 @@ def handle_stop_hook(script_dir: str, bin_path: str, config: dict):
 
     if os.path.exists(bin_path):
         if enable_notch or recent_plan:
+            toast_args = [
+                bin_path,
+                "--mode", "toast",
+                "--title", title,
+                "--message", message,
+                "--sound", toast_sound
+            ]
+            if plan_path:
+                toast_args.extend(["--action", plan_path])
             subprocess.Popen(
-                [
-                    bin_path,
-                    "--mode", "toast",
-                    "--title", title,
-                    "--message", message,
-                    "--sound", toast_sound
-                ],
+                toast_args,
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
@@ -351,6 +433,15 @@ def _main_internal():
 
     # Check if tool is safe / read-only / artifact creation -> Auto allow silently
     if is_safe_action(tool_name, tool_args, data):
+        if tool_name in ("write_to_file", "replace_file_content"):
+            target = tool_args.get("TargetFile", "")
+            if target.endswith(".md"):
+                meta = tool_args.get("ArtifactMetadata")
+                art_dir = data.get("artifactDirectoryPath") if data else None
+                try:
+                    update_artifacts_state(script_dir, art_dir, target, meta)
+                except Exception:
+                    pass
         print(json.dumps({"decision": "allow"}))
         sys.exit(0)
 

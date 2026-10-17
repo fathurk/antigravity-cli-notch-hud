@@ -15,7 +15,13 @@ swiftc -O "$DIR/AntigravityBar.swift" -o "$DIR/bin/antigravity-bar"
 chmod +x "$DIR/bin/antigravity-bar"
 codesign -s - --force "$DIR/bin/antigravity-bar" 2>/dev/null || true
 
+echo "Compiling ArtifactReviewer.swift (Markdown Reviewer & Commenting)..."
+swiftc -O "$DIR/ArtifactReviewer.swift" -o "$DIR/bin/artifact-reviewer"
+chmod +x "$DIR/bin/artifact-reviewer"
+codesign -s - --force "$DIR/bin/artifact-reviewer" 2>/dev/null || true
+
 chmod +x "$DIR/dispatcher.py"
+chmod +x "$DIR/review.sh"
 
 echo "Build complete! Binaries located at $DIR/bin/"
 
