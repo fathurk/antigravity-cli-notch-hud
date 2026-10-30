@@ -7,7 +7,7 @@ import subprocess
 import re
 
 SAFE_TOOLS = {
-    "view_file", "grep_search", "list_dir", "find_by_name", 
+    "view_file", "read_file", "grep_search", "list_dir", "find_by_name", 
     "read_url_content", "schedule", "manage_task", "send_message",
     "invoke_subagent", "manage_subagents"
 }
@@ -136,12 +136,36 @@ def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_fil
         fname = os.path.basename(target_file)
         req_feedback = False
         summary = ""
+        is_approved = False
         if metadata:
             req_feedback = metadata.get("RequestFeedback", metadata.get("requestFeedback", False))
             summary = metadata.get("Summary", metadata.get("summary", ""))
+            is_approved = metadata.get("Approved", metadata.get("approved", False)) or metadata.get("userApproved", False) or metadata.get("status") in ("approved", "reviewed")
         elif "plan" in fname.lower():
-            req_feedback = True
-            summary = "Plan artifact ready for review"
+            meta_path = target_file + ".metadata.json"
+            if os.path.exists(meta_path):
+                try:
+                    with open(meta_path, "r") as mf:
+                        mdata = json.load(mf)
+                        req_feedback = mdata.get("requestFeedback", False)
+                        summary = mdata.get("summary", "")
+                        is_approved = mdata.get("approved", False) or mdata.get("userApproved", False) or mdata.get("status") in ("approved", "reviewed")
+                except Exception:
+                    pass
+            else:
+                req_feedback = True
+                summary = "Plan artifact ready for review"
+
+        prev_item = items_by_path.get(target_file, {})
+        prev_status = prev_item.get("status")
+        prev_approved = prev_item.get("approved", False)
+
+        if is_approved or prev_approved or (prev_status == "reviewed" and not req_feedback):
+            status = "reviewed"
+            req_feedback = False
+            is_approved = True
+        else:
+            status = "pending_review" if req_feedback else "completed"
 
         items_by_path[target_file] = {
             "id": fname,
@@ -149,8 +173,9 @@ def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_fil
             "path": target_file,
             "summary": summary,
             "requestFeedback": req_feedback,
+            "approved": is_approved,
             "updatedAt": time.time(),
-            "status": "pending_review" if req_feedback else "completed"
+            "status": status
         }
 
     if artifact_dir and os.path.exists(artifact_dir):
@@ -160,12 +185,14 @@ def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_fil
                 meta_path = fpath + ".metadata.json"
                 req_feedback = ("plan" in fname.lower())
                 summary = ""
+                is_approved = False
                 if os.path.exists(meta_path):
                     try:
                         with open(meta_path, "r") as mf:
                             mdata = json.load(mf)
                             req_feedback = mdata.get("requestFeedback", req_feedback)
                             summary = mdata.get("summary", summary)
+                            is_approved = mdata.get("approved", False) or mdata.get("userApproved", False) or mdata.get("status") in ("approved", "reviewed")
                     except Exception:
                         pass
                 try:
@@ -173,10 +200,16 @@ def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_fil
                 except Exception:
                     mtime = time.time()
 
-                prev_status = items_by_path.get(fpath, {}).get("status")
-                new_status = "pending_review" if req_feedback else "completed"
-                if prev_status == "reviewed" and not req_feedback:
+                prev_item = items_by_path.get(fpath, {})
+                prev_status = prev_item.get("status")
+                prev_approved = prev_item.get("approved", False)
+
+                if is_approved or prev_approved or (prev_status == "reviewed" and not req_feedback):
                     new_status = "reviewed"
+                    req_feedback = False
+                    is_approved = True
+                else:
+                    new_status = "pending_review" if req_feedback else "completed"
 
                 items_by_path[fpath] = {
                     "id": fname,
@@ -184,17 +217,112 @@ def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_fil
                     "path": fpath,
                     "summary": summary,
                     "requestFeedback": req_feedback,
+                    "approved": is_approved,
                     "updatedAt": mtime,
                     "status": new_status
                 }
 
     sorted_items = sorted(items_by_path.values(), key=lambda x: x.get("updatedAt", 0), reverse=True)
     try:
-        with open(artifacts_path, "w") as f:
+        tmp_artifacts = artifacts_path + ".tmp"
+        with open(tmp_artifacts, "w") as f:
             json.dump(sorted_items, f, indent=2)
+        os.replace(tmp_artifacts, artifacts_path)
     except Exception:
         pass
+
+    # Update session status
+    pending_items = [it for it in sorted_items if it.get("requestFeedback") or it.get("status") == "pending_review"]
+    pending_count = len(pending_items)
+    session_status = "waiting_review" if pending_count > 0 else "active"
+    session_path = os.path.join(state_dir, "session.json")
+    try:
+        session_data = {
+            "status": session_status,
+            "pendingReview": pending_count > 0,
+            "pendingCount": pending_count,
+            "unblocked": pending_count == 0,
+            "lastUpdated": time.time()
+        }
+        with open(session_path + ".tmp", "w") as f:
+            json.dump(session_data, f, indent=2)
+        os.replace(session_path + ".tmp", session_path)
+    except Exception:
+        pass
+
     return sorted_items
+
+def approve_artifact(script_dir: str, artifact_path: str):
+    state_dir = os.path.join(script_dir, "state")
+    os.makedirs(state_dir, exist_ok=True)
+
+    # 1. Update artifact metadata file
+    meta_path = artifact_path + ".metadata.json"
+    meta_dict = {}
+    if os.path.exists(meta_path):
+        try:
+            with open(meta_path, "r") as f:
+                meta_dict = json.load(f)
+        except Exception:
+            meta_dict = {}
+    meta_dict["requestFeedback"] = False
+    meta_dict["approved"] = True
+    meta_dict["userApproved"] = True
+    meta_dict["status"] = "approved"
+    meta_dict["updatedAt"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    if "summary" not in meta_dict:
+        meta_dict["summary"] = os.path.basename(artifact_path)
+    if "userFacing" not in meta_dict:
+        meta_dict["userFacing"] = True
+    try:
+        with open(meta_path + ".tmp", "w") as f:
+            json.dump(meta_dict, f, indent=2)
+        os.replace(meta_path + ".tmp", meta_path)
+    except Exception:
+        pass
+
+    # 2. Update artifacts state
+    art_dir = os.path.dirname(artifact_path)
+    update_artifacts_state(script_dir, artifact_dir=art_dir, target_file=artifact_path, metadata=meta_dict)
+
+    # 3. Unblock waiting agent session by writing allow decision
+    decision_path = os.path.join(state_dir, "decision.json")
+    try:
+        with open(decision_path + ".tmp", "w") as f:
+            json.dump({
+                "decision": "allow",
+                "action": "proceed",
+                "status": "approved",
+                "path": artifact_path,
+                "timestamp": time.time()
+            }, f, indent=2)
+        os.replace(decision_path + ".tmp", decision_path)
+    except Exception:
+        pass
+
+    # 4. Remove pending.json if any
+    pending_path = os.path.join(state_dir, "pending.json")
+    if os.path.exists(pending_path):
+        try:
+            os.remove(pending_path)
+        except Exception:
+            pass
+
+    # 5. Ensure session.json is updated to active & unblocked
+    session_path = os.path.join(state_dir, "session.json")
+    try:
+        with open(session_path + ".tmp", "w") as f:
+            json.dump({
+                "status": "active",
+                "pendingReview": False,
+                "pendingCount": 0,
+                "unblocked": True,
+                "lastApprovedArtifact": artifact_path,
+                "lastUpdated": time.time()
+            }, f, indent=2)
+        os.replace(session_path + ".tmp", session_path)
+    except Exception:
+        pass
 
 def is_safe_action(tool_name: str, args: dict, input_data: dict = None) -> bool:
     if tool_name in SAFE_TOOLS:
@@ -205,12 +333,12 @@ def is_safe_action(tool_name: str, args: dict, input_data: dict = None) -> bool:
         if is_safe_command(cmd):
             return True
 
-    if tool_name in ("write_to_file", "replace_file_content"):
+    if tool_name in ("write_to_file", "replace_file_content", "write_file", "edit_file"):
         # Artifact creation with ArtifactMetadata
         if args.get("ArtifactMetadata"):
             return True
 
-        target = args.get("TargetFile", "")
+        target = args.get("TargetFile", "") or args.get("Path", "")
         basename = os.path.basename(target).lower()
 
         # Plan logs, progress logs, task logs
@@ -244,10 +372,10 @@ def extract_action_details(tool_name: str, args: dict):
         desc = summary or instruction or "Execute terminal command"
         return desc, cmd
 
-    elif tool_name in ("write_to_file", "replace_file_content"):
-        target = args.get("TargetFile", "")
+    elif tool_name in ("write_to_file", "replace_file_content", "write_file", "edit_file"):
+        target = args.get("TargetFile", "") or args.get("Path", "")
         basename = os.path.basename(target)
-        action_type = "Create" if tool_name == "write_to_file" else "Edit"
+        action_type = "Create" if tool_name in ("write_to_file", "write_file") else "Edit"
         
         if instruction:
             desc = f"{action_type} {basename}: {instruction}"
@@ -380,6 +508,14 @@ def _main_internal():
     if len(sys.argv) > 1 and sys.argv[1] == "--stop-hook":
         handle_stop_hook(script_dir, bin_path, config)
 
+    # If called with --approve-artifact <path>
+    if len(sys.argv) > 1 and sys.argv[1] == "--approve-artifact":
+        target = sys.argv[2] if len(sys.argv) > 2 else ""
+        if target:
+            approve_artifact(script_dir, target)
+        print(json.dumps({"status": "approved", "path": target, "decision": "allow"}))
+        sys.exit(0)
+
     # Read stdin for PreToolUse
     try:
         raw_input = sys.stdin.read()
@@ -433,8 +569,8 @@ def _main_internal():
 
     # Check if tool is safe / read-only / artifact creation -> Auto allow silently
     if is_safe_action(tool_name, tool_args, data):
-        if tool_name in ("write_to_file", "replace_file_content"):
-            target = tool_args.get("TargetFile", "")
+        if tool_name in ("write_to_file", "replace_file_content", "write_file", "edit_file"):
+            target = tool_args.get("TargetFile", "") or tool_args.get("Path", "")
             if target.endswith(".md"):
                 meta = tool_args.get("ArtifactMetadata")
                 art_dir = data.get("artifactDirectoryPath") if data else None

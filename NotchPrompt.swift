@@ -347,35 +347,58 @@ struct NotchToastView: View {
             Spacer()
 
             if config.title.contains("Plan") || config.title.contains("Artifact") || config.action.hasSuffix(".md") {
-                Button(action: {
-                    let exeDir = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).deletingLastPathComponent()
-                    let reviewerBin = exeDir.appendingPathComponent("artifact-reviewer")
-                    let process = Process()
-                    process.executableURL = reviewerBin
-                    if !config.action.isEmpty && config.action != "none" {
-                        process.arguments = [config.action]
+                HStack(spacing: 6) {
+                    Button(action: {
+                        let exeDir = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).deletingLastPathComponent()
+                        let reviewerBin = exeDir.appendingPathComponent("artifact-reviewer")
+                        let process = Process()
+                        process.executableURL = reviewerBin
+                        if !config.action.isEmpty && config.action != "none" {
+                            process.arguments = [config.action]
+                        }
+                        try? process.run()
+                        onDismiss()
+                    }) {
+                        HStack(spacing: 3) {
+                            Text("👁")
+                                .font(.system(size: 10 * config.fontScale))
+                            Text("Review")
+                                .font(.system(size: 10 * config.fontScale, weight: .bold))
+                        }
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 3.5)
+                        .background(Color.blue)
+                        .foregroundColor(.white)
+                        .cornerRadius(5)
                     }
-                    try? process.run()
-                    onDismiss()
-                }) {
-                    HStack(spacing: 3) {
-                        Text("👁")
-                            .font(.system(size: 10 * config.fontScale))
-                        Text("Review")
-                            .font(.system(size: 10 * config.fontScale, weight: .bold))
+                    .buttonStyle(PlainButtonStyle())
+
+                    if config.action.hasSuffix(".md") {
+                        Button(action: {
+                            let baseDir = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).deletingLastPathComponent().deletingLastPathComponent()
+                            ArtifactApproval.approveArtifact(path: config.action, baseDir: baseDir, showToast: false)
+                            onDismiss()
+                        }) {
+                            HStack(spacing: 3) {
+                                Text("✓")
+                                    .font(.system(size: 10 * config.fontScale, weight: .bold))
+                                Text("Proceed")
+                                    .font(.system(size: 10 * config.fontScale, weight: .bold))
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 3.5)
+                            .background(Color(red: 0.08, green: 0.55, blue: 0.28))
+                            .foregroundColor(.white)
+                            .cornerRadius(5)
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 3.5)
-                    .background(Color.blue)
-                    .foregroundColor(.white)
-                    .cornerRadius(5)
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
-        .frame(width: (config.title.contains("Plan") || config.action.hasSuffix(".md")) ? max(430, config.toastWidth) : config.toastWidth, height: config.toastHeight)
+        .frame(width: (config.title.contains("Plan") || config.action.hasSuffix(".md")) ? max(460, config.toastWidth) : config.toastWidth, height: config.toastHeight)
         .background(
             ZStack {
                 Color(red: 0.04, green: 0.04, blue: 0.06).opacity(0.96)
@@ -509,8 +532,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // MARK: - Main Entry Point
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-let delegate = AppDelegate()
-app.delegate = delegate
-app.run()
+@main
+struct NotchPromptApp {
+    static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+}

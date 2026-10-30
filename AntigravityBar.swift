@@ -267,22 +267,8 @@ class AppStateManager: ObservableObject {
     }
 
     func markArtifactProceed(path: String) {
-        NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString("proceed", forType: .string)
-
-        if FileManager.default.fileExists(atPath: artifactsFile.path),
-           let data = try? Data(contentsOf: artifactsFile),
-           var items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] {
-            for i in 0..<items.count {
-                if let p = items[i]["path"] as? String, p == path {
-                    items[i]["status"] = "reviewed"
-                    items[i]["requestFeedback"] = false
-                }
-            }
-            if let enc = try? JSONSerialization.data(withJSONObject: items, options: .prettyPrinted) {
-                try? enc.write(to: artifactsFile)
-            }
-        }
+        ArtifactApproval.approveArtifact(path: path, baseDir: baseDir, showToast: true)
+        self.pendingArtifacts.removeAll { $0.path == path }
         reload()
     }
 
@@ -925,8 +911,13 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 // MARK: - Main Entry Point
-let app = NSApplication.shared
-app.setActivationPolicy(.accessory)
-let delegate = MenuBarAppDelegate()
-app.delegate = delegate
-app.run()
+@main
+struct AntigravityBarApp {
+    static func main() {
+        let app = NSApplication.shared
+        app.setActivationPolicy(.accessory)
+        let delegate = MenuBarAppDelegate()
+        app.delegate = delegate
+        app.run()
+    }
+}
