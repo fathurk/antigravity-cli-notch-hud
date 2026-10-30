@@ -6,17 +6,17 @@ mkdir -p "$DIR/bin"
 mkdir -p "$DIR/state"
 
 echo "Compiling NotchPrompt.swift..."
-swiftc -O -parse-as-library "$DIR/Sources/NotchHUDCore/ArtifactApproval.swift" "$DIR/NotchPrompt.swift" -o "$DIR/bin/notch-prompt"
+swiftc -O -parse-as-library "$DIR/NotchPrompt.swift" -o "$DIR/bin/notch-prompt"
 chmod +x "$DIR/bin/notch-prompt"
 codesign -s - --force "$DIR/bin/notch-prompt" 2>/dev/null || true
 
 echo "Compiling AntigravityBar.swift (Menu Bar App)..."
-swiftc -O -parse-as-library "$DIR/Sources/NotchHUDCore/ArtifactApproval.swift" "$DIR/AntigravityBar.swift" -o "$DIR/bin/antigravity-bar"
+swiftc -O -parse-as-library "$DIR/AntigravityBar.swift" -o "$DIR/bin/antigravity-bar"
 chmod +x "$DIR/bin/antigravity-bar"
 codesign -s - --force "$DIR/bin/antigravity-bar" 2>/dev/null || true
 
 echo "Compiling ArtifactReviewer.swift (Markdown Reviewer & Commenting)..."
-swiftc -O -parse-as-library "$DIR/Sources/NotchHUDCore/ArtifactApproval.swift" "$DIR/ArtifactReviewer.swift" -o "$DIR/bin/artifact-reviewer"
+swiftc -O -parse-as-library "$DIR/ArtifactReviewer.swift" -o "$DIR/bin/artifact-reviewer"
 chmod +x "$DIR/bin/artifact-reviewer"
 codesign -s - --force "$DIR/bin/artifact-reviewer" 2>/dev/null || true
 

@@ -3,6 +3,11 @@ import SwiftUI
 import WebKit
 
 // MARK: - Models
+struct ArtifactMetadata: Codable {
+    var summary: String?
+    var requestFeedback: Bool?
+}
+
 struct LineComment: Codable, Identifiable, Equatable {
     var id: String
     var file: String
@@ -159,15 +164,6 @@ class ReviewerState: ObservableObject {
         syncClipboardWithLineComments()
         statusMessage = "🗑️ Line comment removed"
         statusColor = .gray
-    }
-
-    func approveAndProceed() {
-        let exeDir = URL(fileURLWithPath: ProcessInfo.processInfo.arguments[0]).deletingLastPathComponent().deletingLastPathComponent()
-        ArtifactApproval.approveArtifact(path: filePath, baseDir: exeDir, showToast: true)
-
-        self.requestFeedback = false
-        statusMessage = "✅ Plan Approved! Session unblocked & 'proceed' copied."
-        statusColor = .green
     }
 }
 
@@ -872,21 +868,6 @@ struct ReviewerView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                 }
-
-                Button(action: { state.approveAndProceed() }) {
-                    HStack(spacing: 4) {
-                        Text("✓")
-                        Text(state.requestFeedback ? "Approve & Proceed" : "Approved")
-                            .font(.system(size: 10.5, weight: .bold))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(state.requestFeedback ? Color.green : Color.gray.opacity(0.4))
-                    .foregroundColor(state.requestFeedback ? .black : .white.opacity(0.8))
-                    .cornerRadius(4)
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(!state.requestFeedback)
             }
             .padding(.top, 2)
         }

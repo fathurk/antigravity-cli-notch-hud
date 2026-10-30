@@ -22,8 +22,6 @@ struct ConfigJSON: Codable, Equatable {
     }
     struct AutoApprove: Codable, Equatable {
         var enabled: Bool = false
-        var duration_minutes: Double = 15.0
-        var expires_at: Double = 0.0
     }
 
     var notifications: Notifications = Notifications()
@@ -161,68 +159,16 @@ class AppStateManager: ObservableObject {
     }
 
     var isAutoApproveActive: Bool {
-        if !config.auto_approve.enabled { return false }
-        if config.auto_approve.duration_minutes == 0 { return true }
-        return Date().timeIntervalSince1970 < config.auto_approve.expires_at
-    }
-
-    var autoApproveRemainingSeconds: Double {
-        if config.auto_approve.duration_minutes == 0 { return Double.infinity }
-        return max(0, config.auto_approve.expires_at - Date().timeIntervalSince1970)
-    }
-
-    var formattedRemainingTime: String {
-        if config.auto_approve.duration_minutes == 0 {
-            return "No limit (∞)"
-        }
-        let secs = Int(autoApproveRemainingSeconds)
-        let mins = secs / 60
-        let remSecs = secs % 60
-        if mins > 0 {
-            return "\(mins)m \(remSecs)s"
-        } else {
-            return "\(remSecs)s"
-        }
+        return config.auto_approve.enabled
     }
 
     func toggleAutoApprove() {
-        if isAutoApproveActive {
-            config.auto_approve.enabled = false
-            config.auto_approve.expires_at = 0.0
-            config.notifications.enable_notch_popup = true
-        } else {
-            config.auto_approve.enabled = true
-            if config.auto_approve.duration_minutes == 0 {
-                config.auto_approve.expires_at = 0.0
-            } else {
-                let durationSecs = (config.auto_approve.duration_minutes > 0 ? config.auto_approve.duration_minutes : 15.0) * 60.0
-                config.auto_approve.expires_at = Date().timeIntervalSince1970 + durationSecs
-            }
-            config.notifications.enable_notch_popup = false
-        }
-        saveConfig()
-    }
-
-    func setAutoApproveDuration(_ minutes: Double) {
-        config.auto_approve.duration_minutes = minutes
-        if isAutoApproveActive {
-            if minutes == 0 {
-                config.auto_approve.expires_at = 0.0
-            } else {
-                config.auto_approve.expires_at = Date().timeIntervalSince1970 + (minutes * 60.0)
-            }
-        }
+        config.auto_approve.enabled.toggle()
+        config.notifications.enable_notch_popup = !config.auto_approve.enabled
         saveConfig()
     }
 
     func reload() {
-        // Auto-expire auto approve if duration elapsed (and not unlimited)
-        if config.auto_approve.enabled && config.auto_approve.duration_minutes > 0 && config.auto_approve.expires_at > 0 && Date().timeIntervalSince1970 >= config.auto_approve.expires_at {
-            config.auto_approve.enabled = false
-            config.notifications.enable_notch_popup = true
-            saveConfig()
-        }
-
         // Load pending request
         if FileManager.default.fileExists(atPath: pendingFile.path),
            let data = try? Data(contentsOf: pendingFile),
@@ -264,12 +210,6 @@ class AppStateManager: ObservableObject {
         p.executableURL = binPath
         p.arguments = [path]
         try? p.run()
-    }
-
-    func markArtifactProceed(path: String) {
-        ArtifactApproval.approveArtifact(path: path, baseDir: baseDir, showToast: true)
-        self.pendingArtifacts.removeAll { $0.path == path }
-        reload()
     }
 
     func approve(request: PendingRequest) {
@@ -514,20 +454,6 @@ struct MenuBarView: View {
                             .cornerRadius(4)
                         }
                         .buttonStyle(PlainButtonStyle())
-
-                        Button(action: { state.markArtifactProceed(path: item.path) }) {
-                            HStack(spacing: 3) {
-                                Text("✓")
-                                Text("Proceed")
-                                    .font(.system(size: 10, weight: .bold))
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(red: 0.08, green: 0.55, blue: 0.28))
-                            .foregroundColor(.white)
-                            .cornerRadius(4)
-                        }
-                        .buttonStyle(PlainButtonStyle())
                     }
                     .padding(.top, 2)
                 }
@@ -572,7 +498,7 @@ struct MenuBarView: View {
                         Circle()
                             .fill(Color.green)
                             .frame(width: 6, height: 6)
-                        Text(state.config.auto_approve.duration_minutes == 0 ? "Active: Unlimited (No time limit) ⚡" : "Active: \(state.formattedRemainingTime) remaining")
+                        Text("Active: Auto-Approve Enabled ⚡")
                             .font(.system(size: 11, weight: .semibold, design: .rounded))
                             .foregroundColor(.white)
                     }
@@ -599,30 +525,9 @@ struct MenuBarView: View {
                 .cornerRadius(5)
             } else {
                 HStack(spacing: 4) {
-                    Text(state.config.auto_approve.duration_minutes == 0 ? "Auto-approve commands & edits • No time limit (∞)" : "Auto-approve commands & edits • 🔔 Notifs ON")
+                    Text("Auto-approve is OFF • Manual approval required")
                         .font(.system(size: 10, weight: .regular))
                         .foregroundColor(.gray)
-                }
-            }
-
-            HStack {
-                Text("⏱ Duration")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(.white.opacity(0.8))
-                Spacer()
-                HStack(spacing: 4) {
-                    ForEach([5.0, 15.0, 30.0, 60.0, 0.0], id: \.self) { duration in
-                        Button(action: { state.setAutoApproveDuration(duration) }) {
-                            Text(duration == 0 ? "∞" : "\(Int(duration))m")
-                                .font(.system(size: duration == 0 ? 11 : 9, weight: .bold, design: duration == 0 ? .default : .monospaced))
-                                .padding(.horizontal, duration == 0 ? 6 : 5)
-                                .padding(.vertical, 3)
-                                .background(state.config.auto_approve.duration_minutes == duration ? Color.cyan.opacity(0.35) : Color.gray.opacity(0.15))
-                                .foregroundColor(state.config.auto_approve.duration_minutes == duration ? .cyan : .gray)
-                                .cornerRadius(4)
-                        }
-                        .buttonStyle(PlainButtonStyle())
-                    }
                 }
             }
         }
@@ -838,12 +743,7 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
         } else if !stateManager.pendingArtifacts.isEmpty {
             button.title = "⚡📋 (\(stateManager.pendingArtifacts.count))"
         } else if stateManager.isAutoApproveActive {
-            if stateManager.config.auto_approve.duration_minutes == 0 {
-                button.title = "⚡🟢 (∞)"
-            } else {
-                let mins = max(1, Int(ceil(stateManager.autoApproveRemainingSeconds / 60.0)))
-                button.title = "⚡🟢 (\(mins)m)"
-            }
+            button.title = "⚡🟢"
         } else {
             button.title = "⚡ AGY"
         }
@@ -859,7 +759,7 @@ class MenuBarAppDelegate: NSObject, NSApplicationDelegate {
             stateManager.reload()
 
             let width: CGFloat = 330
-            var targetHeight: CGFloat = 435
+            var targetHeight: CGFloat = 390
             if stateManager.pendingRequest != nil {
                 targetHeight += 125
             }

@@ -50,9 +50,7 @@ def load_config(script_dir: str) -> dict:
             "notch_prompt_height": 158
         },
         "auto_approve": {
-            "enabled": False,
-            "duration_minutes": 15.0,
-            "expires_at": 0.0
+            "enabled": False
         }
     }
 
@@ -96,26 +94,7 @@ def is_safe_command(cmd: str) -> bool:
 
 def is_auto_approve_active(config: dict, script_dir: str) -> bool:
     aa = config.get("auto_approve", {})
-    if not aa.get("enabled", False):
-        return False
-    duration_mins = aa.get("duration_minutes", 15.0)
-    expires_at = aa.get("expires_at", 0.0)
-    # Unlimited / no time limit when duration_minutes == 0 or expires_at <= 0
-    if duration_mins == 0 or expires_at <= 0.0:
-        return True
-    now = time.time()
-    if now >= expires_at:
-        # Expired! Auto-disable in config.json and restore notifications
-        aa["enabled"] = False
-        config.setdefault("notifications", {})["enable_notch_popup"] = True
-        try:
-            cfg_path = os.path.join(script_dir, "config.json")
-            with open(cfg_path, "w") as f:
-                json.dump(config, f, indent=2)
-        except Exception:
-            pass
-        return False
-    return True
+    return bool(aa.get("enabled", False))
 
 def update_artifacts_state(script_dir: str, artifact_dir: str = None, target_file: str = None, metadata: dict = None):
     state_dir = os.path.join(script_dir, "state")
